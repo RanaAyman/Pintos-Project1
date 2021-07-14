@@ -72,7 +72,7 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-
+//
 void
 checkInvoke(struct thread *t, void *aux UNUSED)
 {
