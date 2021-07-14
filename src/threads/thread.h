@@ -92,7 +92,7 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
-    int64_t ticks_sleep;              /* Ticks that the thread need to be blocked. */
+    //int64_t ticks_sleep;              /* Ticks that the thread need to be blocked. */
     int original_priority;                  /* Used to record thread's priority when it's not being donated. */
     struct list holding_locks;          /* List of locks the thread is holding. */
     struct lock *lock_waiting;         /* The lock the thread is waiting for. */
