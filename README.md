@@ -1,4 +1,4 @@
-# Pintos
+# Pintos - P1: Threads
 
 ## About
 
