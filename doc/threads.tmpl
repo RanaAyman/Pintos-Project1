@@ -1,0 +1,319 @@
+            +--------------------+
+            |        CS 140      |
+            | PROJECT 1: THREADS |
+            |   DESIGN DOCUMENT  |
+            +--------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Ahmed Akram Ahmed Shawky 18010056
+Rana Ayman Hussein Abdel-razek 18010662
+
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+                 ALARM CLOCK
+                 ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+int64_t ticks_sleep; /* ticks that a thread will sleep (blocked) */
+
+we added a new attribute "ticks_sleep" in (thread) struct with type int64_t as timer_sleep only accepts
+paramter of type int64_t. By default, ticks_sleep has value = 0;
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+
+In timer_sleep : 
+
+Firstly,Original Implementation of timer_sleep function uses thread_yield() which make thread sleep 
+by using "Busy Waiting" techinique. So, We tackle down this problem by putting the thread in real 
+sleep and this our procedures to conquer this problem:
+    -The current thread ticks_sleep is set to the given ticks.
+    -Disable interrupts and insert it in ready list and returns the 
+     previous interrupt status in old_level attribute.
+    -Block the thread then reschedule.
+    -Reset interrupts level to its old one.
+
+
+In timer interrupt handeler:  
+
+    -We check the list to see if any threads need to be waken up and if we 
+    found any thread need to wake up we reset the thread's ticks_sleep.
+    -Disable interrupt and remove it from ready list
+    -Unblock thread
+    -Reset interrupts level to its old one.
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+
+An ordered list which is sorted and inserted by sleep_ticks number is used, 
+so that we can check the list from the beginning and stop whenever the 
+sleep_ticks is larger than the current ticks, which guarantees the later 
+threads in the sleep list don’t need to be checked. By this means, we can 
+minimize the time spent.
+
+
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+We disable the interrupts for the thread.
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+The interrupt is disabled.
+
+---- RATIONALE ----
+
+>> A6: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+Because this is 'Simple' and 'Powerful' solution for avoiding busy waiting of timer as far as we know.
+
+             PRIORITY SCHEDULING
+             ===================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+we added the following attributes in:
+-thread struct :
+int original_priority;      /* Used to record thread's priority when it's not being donated*/
+struct list holding_locks   /* List of locks the thread is holding */
+struct lock *lock_waiting;  /* The lock the thread is waiting for. */
+
+-lock struct :
+struct list_elem elem;      /* The list element stored for priority donation. */
+int max_priority;           /* The maximum priority among the priorities of threads acquiring the lock. */
+
+
+>> B2: Explain the data structure used to track priority donation.
+>> Use ASCII art to diagram a nested donation.  (Alternately, submit a
+>> .png file.)
+
+donated pri: 5         donated pri: 5           donated pri: 5       
+ --------                 --------                 --------                  --------
+|Thread A|  waits for X  |Thread B|  waits for Y  |Thread C|   waits for Z  |Thread D|
+|pri: 1  | <------------ |pri: 2  | <------------ |pri: 3  |  <------------ |pri: 5  |
+|locks: X|               |locks: Y|               |locks: Z|                |        |
+ --------                 --------                 --------                  --------
+
+In the case of nested priority donation (see diagram), in order to determine the
+donated priority of thread A, we have to determine the donated priority of B, which in
+turn requires us to determine the donated priority of C. To do this we could call
+thread_get_priority_of() for each thread, waiting for A and then recursively
+call it for every thread waiting for any of those and so on. This takes time and
+if the threads are in a deadlock it may never return.
+
+This is prevented by using thread_get_priority() recursively which takes an
+integer argument and increases it for every level of waiting threads. If
+thread_get_priority() is called recursively with an argument > PRI_MAX_RECURSION
+it returns without calling itself again.
+
+---- ALGORITHMS ----
+
+>> B3: How do you ensure that the highest priority thread waiting for
+>> a lock, semaphore, or condition variable wakes up first?
+
+They are inserted by using list_insert_order() function that guarantees
+ that the highest priority thread is the first element in the list.
+
+>> B4: Describe the sequence of events when a call to lock_acquire()
+>> causes a priority donation.  How is nested donation handled?
+
+When a thread acquires a lock, if the lock is available, the current thread get the lock,
+change the semaphore value of the lock to be 0. Then when other threads also calls
+lock_acquire() , they will be blocked and added to the semaphore waiter.
+So we will call list_insert_ordered() instead of list_push_back() .
+When a thread successfully gets the lock, the lock will be added into the thread's
+holding_locks list.
+When a thread has to sleep to wait the lock being released, set the lock to be the
+lock_waiting
+When acquring a lock, if the thread with higher priority wants to acquire a lock
+which is held by a lower priority thread, the higher priority thread will set the priority of the
+lower priority to be the same as higher priority. And the lock will be added into the thread lock_waiting list.
+After the donation, the original lower priority thread will run firstly. The original lower priority thread will first
+check if the lock_waiting attribute is NULL. If it isn't, the original lower priority shoud set the priority
+of the thread holding the lock_waiting to be the same as lower priority thread.
+
+>> B5: Describe the sequence of events when lock_release() is called
+>> on a lock that a higher-priority thread is waiting for.
+
+When a thread releasing a lock, we need to reset the thread priority based on elements in
+the holding_locks .
+First, remove the lock released from the holding_locks list.
+Then, Let's talk about 2 different situations.
+a. After removing, there is no element in the list.
+We simply set the priority of the thread to be the original priority .
+b. After removing, there are more than 1 element in the list.
+we can get the maximum priority among these and set the thread priority to be the maximum value.
+
+---- SYNCHRONIZATION ----
+
+>> B6: Describe a potential race in thread_set_priority() and explain
+>> how your implementation avoids it.  Can you use a lock to avoid
+>> this race?
+
+First Let's consider the new attributes added by my design. I only add locks_holding and
+lock_waiting to the struct thread. Because these attributes are in the thread struct, it can not be
+accessed by more than 2 accesses. So my modification won't generate synchronization issues.
+There are list operations in semaphore . For example, sema_down() pushes a new thread to the
+waiter list. However, we could see that sema_down() calls intr_disable() to disable instruction
+which ensures synchronization.
+
+---- RATIONALE ----
+
+>> B7: Why did you choose this design?  In what ways is it superior to
+>> another design you considered?
+
+This design is clear and easy to implement.
+
+              ADVANCED SCHEDULER
+              ==================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In thread struct we added :
+ int nice;                           /*Nice value*/
+ fixed_t recent_cpu;                 /*Recent CPU*/
+
+In thread.c we declared :
+fixed_t load_avg;
+
+Include floating point header files in thread.h: #include "threads/fixed-point.h"
+
+---- ALGORITHMS ----
+
+>> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
+>> has a recent_cpu value of 0.  Fill in the table below showing the
+>> scheduling decision and the priority and recent_cpu values for each
+>> thread after each given number of timer ticks:
+
+timer  recent_cpu    priority   thread
+ticks   A   B   C    A   B   C   to run
+-----  --  --  --  --  --  --   ------
+0       0   0   0   63   61  59    A 
+4       4   0   0   62   61  59    A 
+8       8   0   0   61   61  59    B 
+12      8   4   0   61   60  59    A 
+16     12   4   0   60   60  59    B 
+20     12   8   0   60   59  59    A 
+24     16   8   0   59   59  59    C 
+28     16   8   4   59   59  58    B 
+32     16   12  4   59   58  58    A 
+36     20   12  4   58   58  58    C 
+
+>> C3: Did any ambiguities in the scheduler specification make values
+>> in the table uncertain?  If so, what rule did you use to resolve
+>> them?  Does this match the behavior of your scheduler?
+
+Yes. there are always threads of the same priority.
+My solution is to follow the FIFO principle. The thread first enters the priority queue (of a certain
+value) will be executed first.
+
+>> C4: How is the way you divided the cost of scheduling between code
+>> inside and outside interrupt context likely to affect performance?
+
+If the CPU spends too much time on calculations for recent_cpu, load_avg and 
+priority, then it takes away most of the time that a thread before enforced 
+preemption. Then this thread can not get enough running time as expected and it 
+will run longer. This will cause itself got blamed for occupying more CPU time, 
+and raise its load_avg, recent_cpu, and therefore lower its priority. This may 
+disturb the scheduling decisions making. Thus, if the cost of scheduling inside 
+the interrupt context goes up, it will lower performance.
+
+---- RATIONALE ----
+
+>> C5: Briefly critique your design, pointing out advantages and
+>> disadvantages in your design choices.  If you were to have extra
+>> time to work on this part of the project, how might you choose to
+>> refine or improve your design?
+- Advantages are that it is simple , powerful and very time efficient.
+- Disadvantages Our design did not apply the 64 queues. We used only one queue -- the 
+ready_list that Pintos originally have. we keep the ready_list as an priority oriented 
+descending order at the every beginning -- that is, whenever we insert a thread into 
+the ready_list, we insert it in order. The time complexity is O(n). Every fourth tick, 
+it is required to calculate priority for all the threads in the all_list. After this, we 
+need to sort the ready_list, which will take O(n lgn) time. Since we need to do this job 
+every 4 ticks, it will make a thread’s running ticks shorter than it is expected. 
+If n becomes larger, thread switching may happen quite often. If we use 64 queues 
+for the ready threads, we can put the 64 queues in an array with index equaling to
+its priority value. When the thread is first inserted, it only need to index the 
+queue by this thread’s priority. This will take only O(1) time. After priority calculation
+for all threads every fourth tick, it takes O(n) time to re-insert the ready threads.
+But our implementation is better than this situation -- ready_list is not ordered. 
+Like pintos originally did, for every new unblocked thread, just push back to the ready_list.
+When it need to find next thread to run, it has to reorder the ready_list. Sorting takes O(n lgn) time. 
+
+
+>> C6: The assignment explains arithmetic for fixed-point math in
+>> detail, but it leaves it open to you to implement it.  Why did you
+>> decide to implement it the way you did?  If you created an
+>> abstraction layer for fixed-point math, that is, an abstract data
+>> type and/or a set of functions or macros to manipulate fixed-point
+>> numbers, why did you do so?  If not, why not?
+
+A: As mentioned in the BSD scheduling manual, recent_cpu and load_avg are real 
+numbers, but pintos disabled float numbers. Instead using float number, we can 
+use fixed-point numbers. So we use fixed-point numbers to represent recent_cpu 
+and load_avg.
+We used #define macro in the new created header fixed-point.h under thread. We 
+did not implement them as inline functions in thread.c because
+1. They are simple. Every parameter only appears once in the calculation, which 
+can avoid the #define macro’s error, which calculate the same parameter 
+(expression) multiple times.
+2. They are faster than inline functions.
+
+               SURVEY QUESTIONS
+               ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+We don't have much time for the project and it was a bit hard.
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+We realized that even the smallest part of the OS had to be delicately designed.
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+It looks very difficult. Students have to try digging on
+the structure of the Operating Systems.
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+NO, Thank You Eng. Khaled. We appreciate all your efforts.
+
+>> Any other comments?
