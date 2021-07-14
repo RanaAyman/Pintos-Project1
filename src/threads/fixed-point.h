@@ -1,6 +1,6 @@
 #ifndef __THREAD_FIXED_POINT_H
 #define __THREAD_FIXED_POINT_H
-
+//
 /* Basic definitions of fixed point. */
 typedef int fixed_t;
 /* 16 LSB used for fractional part. */
